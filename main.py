@@ -136,16 +136,16 @@ def callback_handler(call):
     if call.data == "notes_list":
         show_notes_titles_list(call.message, user_id)
         return
-    elif call.data.startswith("notes_show_title_"):
-        title = call.data.split("_", 3)[3]
-        show_notes_title_details(call.message, title, user_id)
+    elif call.data.startswith("notes_show_"):
+        note_id = int(call.data.split("_", 2)[2])
+        show_notes_details(call.message, note_id, user_id)
         return
     elif call.data == "hw_list":
         show_hw_subjects_list(call.message, user_id)
         return
-    elif call.data.startswith("hw_show_subject_"):
-        subject = call.data.split("_", 3)[3]
-        show_hw_subject_details(call.message, subject, user_id)
+    elif call.data.startswith("hw_show_"):
+        hw_id = int(call.data.split("_", 2)[2])
+        show_hw_details(call.message, hw_id, user_id)
         return
     elif call.data == "back_to_main":
         bot.edit_message_text(chat_id=chat_id, message_id=message_id,
@@ -235,7 +235,7 @@ def show_notes_titles_list(message, user_id=None):
         label = title
         if photos: label += f" (фото: {len(photos)})"
         if files: label += f" (файлы: {len(files)})"
-        btn = types.InlineKeyboardButton(label, callback_data=f"notes_show_title_{title}")
+        btn = types.InlineKeyboardButton(label, callback_data=f"notes_show_{min_id}")
         markup.add(btn)
 
     if is_notes_admin(user_id):
@@ -251,23 +251,24 @@ def show_notes_titles_list(message, user_id=None):
     else:
         bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=markup)
 
-def show_notes_title_details(message, title, user_id):
+def show_notes_details(message, note_id, user_id):
     conn = sqlite3.connect('notes.db')
     c = conn.cursor()
-    c.execute('SELECT id, content, photo_file_ids, file_file_ids, created_at, creator_username FROM notes WHERE title = ? ORDER BY id', (title,))
-    rows = c.fetchall()
+    c.execute('SELECT id, title, content, photo_file_ids, file_file_ids, created_at, creator_username FROM notes WHERE id = ?', (note_id,))
+    row = c.fetchone()
     conn.close()
 
-    if not rows:
-        bot.send_message(message.chat.id, f"Заметка <b>{html.escape(title)}</b> не найдена.", parse_mode='HTML')
+    if not row:
+        bot.send_message(message.chat.id, "Заметка не найдена.", parse_mode='HTML')
         return
 
-    title_id = rows[0][0]
-    content = rows[0][1]
-    all_photos = json.loads(rows[0][2]) if rows[0][2] else []
-    all_files = json.loads(rows[0][3]) if rows[0][3] else []
-    created_at = rows[0][4]
-    creator_identifier = rows[0][5]
+    title_id = row[0]
+    title = row[1]
+    content = row[2]
+    all_photos = json.loads(row[3]) if row[3] else []
+    all_files = json.loads(row[4]) if row[4] else []
+    created_at = row[5]
+    creator_identifier = row[6]
 
     text = f"<b>Заметка: {html.escape(title)}</b>\n\n"
     photo_mark = f" (фото: {len(all_photos)})" if all_photos else ""
@@ -539,7 +540,7 @@ def show_hw_subjects_list(message, user_id=None):
         label = subject
         if photos: label += f" (фото: {len(photos)})"
         if files: label += f" (файлы: {len(files)})"
-        btn = types.InlineKeyboardButton(label, callback_data=f"hw_show_subject_{subject}")
+        btn = types.InlineKeyboardButton(label, callback_data=f"hw_show_{min_id}")
         markup.add(btn)
 
     if is_hw_admin(user_id):
@@ -555,22 +556,23 @@ def show_hw_subjects_list(message, user_id=None):
     else:
         bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=markup)
 
-def show_hw_subject_details(message, subject, user_id):
+def show_hw_details(message, hw_id, user_id):
     conn = sqlite3.connect('homework.db')
     c = conn.cursor()
-    c.execute('SELECT id, task, due_date, photo_file_ids, file_file_ids FROM homework WHERE subject = ? ORDER BY id', (subject,))
-    rows = c.fetchall()
+    c.execute('SELECT id, subject, task, due_date, photo_file_ids, file_file_ids FROM homework WHERE id = ?', (hw_id,))
+    row = c.fetchone()
     conn.close()
 
-    if not rows:
-        bot.send_message(message.chat.id, f"ДЗ по <b>{html.escape(subject)}</b> не найдено.", parse_mode='HTML')
+    if not row:
+        bot.send_message(message.chat.id, "ДЗ не найдено.", parse_mode='HTML')
         return
 
-    subject_id = rows[0][0]
-    task = rows[0][1]
-    due = rows[0][2]
-    all_photos = json.loads(rows[0][3]) if rows[0][3] else []
-    all_files = json.loads(rows[0][4]) if rows[0][4] else []
+    subject_id = row[0]
+    subject = row[1]
+    task = row[2]
+    due = row[3]
+    all_photos = json.loads(row[4]) if row[4] else []
+    all_files = json.loads(row[5]) if row[5] else []
 
     text = f"<b>ДЗ по предмету: {html.escape(subject)}</b>\n\n"
     due_text = f"Срок: {html.escape(due)}" if due else "Срок: Не указано"
