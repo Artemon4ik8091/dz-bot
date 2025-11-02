@@ -58,6 +58,8 @@ def init_notes_db():
             title TEXT NOT NULL,
             content TEXT NOT NULL,
             photo_file_ids TEXT,
+            video_file_ids TEXT,
+            audio_file_ids TEXT,
             file_file_ids TEXT,
             created_at TEXT,
             creator_username TEXT
@@ -67,6 +69,10 @@ def init_notes_db():
     columns = [info[1] for info in c.fetchall()]
     if 'photo_file_ids' not in columns:
         c.execute('ALTER TABLE notes ADD COLUMN photo_file_ids TEXT')
+    if 'video_file_ids' not in columns:
+        c.execute('ALTER TABLE notes ADD COLUMN video_file_ids TEXT')
+    if 'audio_file_ids' not in columns:
+        c.execute('ALTER TABLE notes ADD COLUMN audio_file_ids TEXT')
     if 'file_file_ids' not in columns:
         c.execute('ALTER TABLE notes ADD COLUMN file_file_ids TEXT')
     if 'creator_username' not in columns:
@@ -84,6 +90,8 @@ def init_hw_db():
             task TEXT NOT NULL,
             due_date TEXT,
             photo_file_ids TEXT,
+            video_file_ids TEXT,
+            audio_file_ids TEXT,
             file_file_ids TEXT,
             created_at TEXT
         )
@@ -92,6 +100,10 @@ def init_hw_db():
     columns = [info[1] for info in c.fetchall()]
     if 'photo_file_ids' not in columns:
         c.execute('ALTER TABLE homework ADD COLUMN photo_file_ids TEXT')
+    if 'video_file_ids' not in columns:
+        c.execute('ALTER TABLE homework ADD COLUMN video_file_ids TEXT')
+    if 'audio_file_ids' not in columns:
+        c.execute('ALTER TABLE homework ADD COLUMN audio_file_ids TEXT')
     if 'file_file_ids' not in columns:
         c.execute('ALTER TABLE homework ADD COLUMN file_file_ids TEXT')
     conn.commit()
@@ -110,8 +122,8 @@ def is_hw_admin(user_id):
 # === КНОПКИ ===
 def main_menu(user_id):
     markup = types.InlineKeyboardMarkup(row_width=1)
-    btn_notes = types.InlineKeyboardButton("Заметки", callback_data="notes_list")
-    btn_hw = types.InlineKeyboardButton("Домашние задания", callback_data="hw_list")
+    btn_notes = types.InlineKeyboardButton("Заметки", callback_data="notes_list_1")
+    btn_hw = types.InlineKeyboardButton("Домашние задания", callback_data="hw_list_1")
     markup.add(btn_notes, btn_hw)
     return markup
 
@@ -119,7 +131,7 @@ def main_menu(user_id):
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.from_user.id
-    text = "Привет! Это бот для хранения заметок и домашнего задания.\n\nНовости последнего обновления:\nДобавлен раздел с заметками! Писать там можно что угодно и когда удобно (эксклюзивно людям из группы МЕХАТРОНИКОВ :). Другим нельзя). Жду мемчики и всякую ересь. Полезной инфы не надо (шутка). Good Luck!\n\n"
+    text = "Привет! Это бот для хранения заметок и домашнего задания.\n\nНовости последнего обновления:\nДобавлена поддержка загрузки аудио и видео, а так же изменён вид списка заметок и дз. Good Luck!\n\n"
     if is_notes_admin(user_id) or is_hw_admin(user_id):
         text += "Вы — админ. Можете добавлять и редактировать записи."
     else:
@@ -133,15 +145,17 @@ def callback_handler(call):
     chat_id = call.message.chat.id
     message_id = call.message.message_id
 
-    if call.data == "notes_list":
-        show_notes_titles_list(call.message, user_id)
+    if call.data.startswith("notes_list_"):
+        page = int(call.data.split("_", 2)[2])
+        show_notes_titles_list(call.message, user_id, page)
         return
     elif call.data.startswith("notes_show_"):
         note_id = int(call.data.split("_", 2)[2])
         show_notes_details(call.message, note_id, user_id)
         return
-    elif call.data == "hw_list":
-        show_hw_subjects_list(call.message, user_id)
+    elif call.data.startswith("hw_list_"):
+        page = int(call.data.split("_", 2)[2])
+        show_hw_subjects_list(call.message, user_id, page)
         return
     elif call.data.startswith("hw_show_"):
         hw_id = int(call.data.split("_", 2)[2])
@@ -149,7 +163,7 @@ def callback_handler(call):
         return
     elif call.data == "back_to_main":
         bot.edit_message_text(chat_id=chat_id, message_id=message_id,
-                              text="Новости последнего обновления:\nДобавлен раздел с заметками! Писать там можно что угодно и когда удобно (эксклюзивно людям из группы МЕХАТРОНИКОВ :). Другим нельзя). Жду мемчики и всякую ересь. Полезной инфы не надо (шутка). Good Luck!\n\nГлавное меню:", reply_markup=main_menu(user_id))
+                              text="Новости последнего обновления:\nДобавлена поддержка загрузки аудио и видео, а так же изменён вид списка заметок и дз. Good Luck!\n\nГлавное меню:", reply_markup=main_menu(user_id))
         return
 
     if call.data.startswith("notes_") and not is_notes_admin(user_id):
@@ -164,6 +178,10 @@ def callback_handler(call):
         notes_start_add_note(call.message, user_id, creator_identifier)
     elif call.data == "notes_add_more_photos":
         notes_continue_adding_photos(call, user_id)
+    elif call.data == "notes_add_more_videos":
+        notes_continue_adding_videos(call, user_id)
+    elif call.data == "notes_add_more_audios":
+        notes_continue_adding_audios(call, user_id)
     elif call.data == "notes_add_more_files":
         notes_continue_adding_files(call, user_id)
     elif call.data == "notes_finish_adding":
@@ -181,6 +199,10 @@ def callback_handler(call):
         hw_start_add_hw(call.message, user_id)
     elif call.data == "hw_add_more_photos":
         hw_continue_adding_photos(call, user_id)
+    elif call.data == "hw_add_more_videos":
+        hw_continue_adding_videos(call, user_id)
+    elif call.data == "hw_add_more_audios":
+        hw_continue_adding_audios(call, user_id)
     elif call.data == "hw_add_more_files":
         hw_continue_adding_files(call, user_id)
     elif call.data == "hw_finish_adding":
@@ -212,28 +234,45 @@ def callback_handler(call):
 notes_add_state = {}
 notes_edit_state = {}
 
-def show_notes_titles_list(message, user_id=None):
+def show_notes_titles_list(message, user_id=None, page=1):
     if user_id is None:
         user_id = message.from_user.id if hasattr(message, 'from_user') else message.chat.id
 
     conn = sqlite3.connect('notes.db')
     c = conn.cursor()
-    c.execute('SELECT title, MIN(id) as min_id, photo_file_ids, file_file_ids FROM notes GROUP BY title ORDER BY min_id')
+    c.execute('SELECT title, MIN(id) as min_id, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids FROM notes GROUP BY title ORDER BY min_id')
     rows = c.fetchall()
     conn.close()
+
+    ITEMS_PER_PAGE = 5
+    total_items = len(rows)
+    total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    if page < 1:
+        page = 1
+    if page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    page_rows = rows[start_idx:end_idx]
 
     markup = types.InlineKeyboardMarkup(row_width=1)
 
     if not rows:
         text = "Нет заметок."
     else:
-        text = "<b>Выберите заметку:</b>"
+        text = f"<b>Выберите заметку (страница {page}/{total_pages}):</b>"
 
-    for title, min_id, photo_json, file_json in rows:
+    for title, min_id, photo_json, video_json, audio_json, file_json in page_rows:
         photos = json.loads(photo_json) if photo_json else []
+        videos = json.loads(video_json) if video_json else []
+        audios = json.loads(audio_json) if audio_json else []
         files = json.loads(file_json) if file_json else []
         label = title
         if photos: label += f" (фото: {len(photos)})"
+        if videos: label += f" (видео: {len(videos)})"
+        if audios: label += f" (аудио: {len(audios)})"
         if files: label += f" (файлы: {len(files)})"
         btn = types.InlineKeyboardButton(label, callback_data=f"notes_show_{min_id}")
         markup.add(btn)
@@ -242,10 +281,21 @@ def show_notes_titles_list(message, user_id=None):
         btn_add = types.InlineKeyboardButton("Добавить заметку", callback_data="notes_add")
         markup.add(btn_add)
 
+    # Пагинация
+    nav_row = []
+    if page > 1:
+        btn_prev = types.InlineKeyboardButton("◀️ Предыдущая", callback_data=f"notes_list_{page-1}")
+        nav_row.append(btn_prev)
+    if page < total_pages:
+        btn_next = types.InlineKeyboardButton("Следующая ▶️", callback_data=f"notes_list_{page+1}")
+        nav_row.append(btn_next)
+    if nav_row:
+        markup.row(*nav_row)
+
     btn_back = types.InlineKeyboardButton("Назад", callback_data="back_to_main")
     markup.add(btn_back)
 
-    if hasattr(message, 'callback_query'):
+    if hasattr(message, 'message_id'):
         bot.edit_message_text(chat_id=message.chat.id, message_id=message.message_id,
                               text=text, parse_mode='HTML', reply_markup=markup)
     else:
@@ -254,7 +304,7 @@ def show_notes_titles_list(message, user_id=None):
 def show_notes_details(message, note_id, user_id):
     conn = sqlite3.connect('notes.db')
     c = conn.cursor()
-    c.execute('SELECT id, title, content, photo_file_ids, file_file_ids, created_at, creator_username FROM notes WHERE id = ?', (note_id,))
+    c.execute('SELECT id, title, content, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at, creator_username FROM notes WHERE id = ?', (note_id,))
     row = c.fetchone()
     conn.close()
 
@@ -266,14 +316,18 @@ def show_notes_details(message, note_id, user_id):
     title = row[1]
     content = row[2]
     all_photos = json.loads(row[3]) if row[3] else []
-    all_files = json.loads(row[4]) if row[4] else []
-    created_at = row[5]
-    creator_identifier = row[6]
+    all_videos = json.loads(row[4]) if row[4] else []
+    all_audios = json.loads(row[5]) if row[5] else []
+    all_files = json.loads(row[6]) if row[6] else []
+    created_at = row[7]
+    creator_identifier = row[8]
 
     text = f"<b>Заметка: {html.escape(title)}</b>\n\n"
     photo_mark = f" (фото: {len(all_photos)})" if all_photos else ""
+    video_mark = f" (видео: {len(all_videos)})" if all_videos else ""
+    audio_mark = f" (аудио: {len(all_audios)})" if all_audios else ""
     file_mark = f" (файлы: {len(all_files)})" if all_files else ""
-    text += f"{photo_mark}{file_mark}\n{html.escape(content)}\n\n"
+    text += f"{photo_mark}{video_mark}{audio_mark}{file_mark}\n{html.escape(content)}\n\n"
 
     if creator_identifier.isdigit():
         creator_display = f"ID {html.escape(creator_identifier)}"
@@ -282,7 +336,7 @@ def show_notes_details(message, note_id, user_id):
     text += f"Создатель: {creator_display} | Дата создания: {html.escape(created_at)}\n"
 
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="notes_list")
+    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="notes_list_1")
     markup.add(btn_back)
 
     if is_notes_admin(user_id):
@@ -300,6 +354,18 @@ def show_notes_details(message, note_id, user_id):
         except Exception as e:
             bot.send_message(message.chat.id, f"Ошибка отправки фото: {e}")
 
+    for video_id in all_videos:
+        try:
+            bot.send_video(message.chat.id, video_id)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"Не удалось отправить видео: {e}")
+
+    for audio_id in all_audios:
+        try:
+            bot.send_audio(message.chat.id, audio_id)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"Не удалось отправить аудио: {e}")
+
     for file_id in all_files:
         try:
             bot.send_document(message.chat.id, file_id)
@@ -307,7 +373,7 @@ def show_notes_details(message, note_id, user_id):
             bot.send_message(message.chat.id, f"Не удалось отправить файл: {e}")
 
 def notes_start_add_note(message, user_id, creator_identifier):
-    notes_add_state[user_id] = {'step': 'title', 'photos': [], 'files': [], 'creator_identifier': creator_identifier}
+    notes_add_state[user_id] = {'step': 'title', 'photos': [], 'videos': [], 'audios': [], 'files': [], 'creator_identifier': creator_identifier}
     markup = types.InlineKeyboardMarkup()
     btn_cancel = types.InlineKeyboardButton("Отмена", callback_data="cancel")
     markup.add(btn_cancel)
@@ -333,21 +399,32 @@ def notes_get_content(message):
 
     markup = types.InlineKeyboardMarkup(row_width=2)
     btn_photo = types.InlineKeyboardButton("Фото", callback_data="notes_add_more_photos")
+    btn_video = types.InlineKeyboardButton("Видео", callback_data="notes_add_more_videos")
+    btn_audio = types.InlineKeyboardButton("Аудио", callback_data="notes_add_more_audios")
     btn_file = types.InlineKeyboardButton("Файлы", callback_data="notes_add_more_files")
     btn_done = types.InlineKeyboardButton("Готово", callback_data="notes_finish_adding")
     btn_cancel = types.InlineKeyboardButton("Отмена", callback_data="cancel")
-    markup.add(btn_photo, btn_file)
+    markup.add(btn_photo, btn_video)
+    markup.add(btn_audio, btn_file)
     markup.add(btn_done)
     markup.add(btn_cancel)
 
     sent = bot.send_message(message.chat.id,
-                            "Добавьте <b>фото</b> или <b>файлы</b> (PDF, DOC, ZIP и др.)\n"
+                            "Добавьте <b>фото</b>, <b>видео</b>, <b>аудио</b> или <b>файлы</b> (PDF, DOC, ZIP и др.)\n"
                             "или нажмите <b>Готово</b>", parse_mode='HTML', reply_markup=markup)
     notes_add_state[user_id]['last_msg_id'] = sent.message_id
 
 def notes_continue_adding_photos(call, user_id):
     if notes_add_state.get(user_id, {}).get('step') != 'attachments': return
     bot.answer_callback_query(call.id, "Отправьте фото...")
+
+def notes_continue_adding_videos(call, user_id):
+    if notes_add_state.get(user_id, {}).get('step') != 'attachments': return
+    bot.answer_callback_query(call.id, "Отправьте видео...")
+
+def notes_continue_adding_audios(call, user_id):
+    if notes_add_state.get(user_id, {}).get('step') != 'attachments': return
+    bot.answer_callback_query(call.id, "Отправьте аудио...")
 
 def notes_continue_adding_files(call, user_id):
     if notes_add_state.get(user_id, {}).get('step') != 'attachments': return
@@ -361,6 +438,24 @@ def notes_get_photos(message):
     notes_add_state[user_id]['photos'].append(file_id)
     count = len(notes_add_state[user_id]['photos'])
     bot.reply_to(message, f"Добавлено фото: {count}. Отправьте ещё или нажмите <b>Готово</b>.", parse_mode='HTML')
+
+@bot.message_handler(func=lambda m: notes_add_state.get(m.from_user.id, {}).get('step') == 'attachments', content_types=['video'])
+def notes_get_videos(message):
+    user_id = message.from_user.id
+    if not is_notes_admin(user_id): return
+    file_id = message.video.file_id
+    notes_add_state[user_id]['videos'].append(file_id)
+    count = len(notes_add_state[user_id]['videos'])
+    bot.reply_to(message, f"Добавлено видео: {count}. Отправьте ещё или нажмите <b>Готово</b>.", parse_mode='HTML')
+
+@bot.message_handler(func=lambda m: notes_add_state.get(m.from_user.id, {}).get('step') == 'attachments', content_types=['audio'])
+def notes_get_audios(message):
+    user_id = message.from_user.id
+    if not is_notes_admin(user_id): return
+    file_id = message.audio.file_id
+    notes_add_state[user_id]['audios'].append(file_id)
+    count = len(notes_add_state[user_id]['audios'])
+    bot.reply_to(message, f"Добавлено аудио: {count}. Отправьте ещё или нажмите <b>Готово</b>.", parse_mode='HTML')
 
 @bot.message_handler(func=lambda m: notes_add_state.get(m.from_user.id, {}).get('step') == 'attachments', content_types=['document'])
 def notes_get_files(message):
@@ -376,9 +471,13 @@ def notes_finish_adding_note(call, user_id):
     title = data['title']
     content = data['content']
     photos = data['photos']
+    videos = data['videos']
+    audios = data['audios']
     files = data['files']
     creator_identifier = data['creator_identifier']
     photo_json = json.dumps(photos) if photos else None
+    video_json = json.dumps(videos) if videos else None
+    audio_json = json.dumps(audios) if audios else None
     file_json = json.dumps(files) if files else None
     local_tz = timezone(timedelta(hours=3))
     created_at = datetime.now(tz=local_tz).strftime('%Y-%m-%d %H:%M')
@@ -392,16 +491,16 @@ def notes_finish_adding_note(call, user_id):
 
     # ДОБАВЛЯЕМ НОВУЮ
     c.execute('''
-        INSERT INTO notes (title, content, photo_file_ids, file_file_ids, created_at, creator_username)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (title, content, photo_json, file_json, created_at, creator_identifier))
+        INSERT INTO notes (title, content, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at, creator_username)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (title, content, photo_json, video_json, audio_json, file_json, created_at, creator_identifier))
     conn.commit()
     conn.close()
 
     action = "обновлена" if deleted > 0 else "добавлена"
     response = f"<b>Заметка <code>{html.escape(title)}</code> {action}!</b>\n\n<b>{html.escape(content)}</b>"
     markup = types.InlineKeyboardMarkup()
-    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="notes_list")
+    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="notes_list_1")
     markup.add(btn_back)
 
     sent_text = False
@@ -414,6 +513,18 @@ def notes_finish_adding_note(call, user_id):
             sent_text = True
         except Exception as e:
             bot.send_message(call.message.chat.id, f"Ошибка при отправке фото: {e}")
+
+    for video_id in videos:
+        try:
+            bot.send_video(call.message.chat.id, video_id)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"Ошибка при отправке видео: {e}")
+
+    for audio_id in audios:
+        try:
+            bot.send_audio(call.message.chat.id, audio_id)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"Ошибка при отправке аудио: {e}")
 
     if files:
         for file_id in files:
@@ -517,28 +628,45 @@ def notes_do_delete_title_by_id(call, title_id):
 hw_add_state = {}
 hw_edit_state = {}
 
-def show_hw_subjects_list(message, user_id=None):
+def show_hw_subjects_list(message, user_id=None, page=1):
     if user_id is None:
         user_id = message.from_user.id if hasattr(message, 'from_user') else message.chat.id
 
     conn = sqlite3.connect('homework.db')
     c = conn.cursor()
-    c.execute('SELECT subject, MIN(id) as min_id, photo_file_ids, file_file_ids FROM homework GROUP BY subject ORDER BY min_id')
+    c.execute('SELECT subject, MIN(id) as min_id, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids FROM homework GROUP BY subject ORDER BY min_id')
     rows = c.fetchall()
     conn.close()
+
+    ITEMS_PER_PAGE = 5
+    total_items = len(rows)
+    total_pages = (total_items + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE
+
+    if page < 1:
+        page = 1
+    if page > total_pages:
+        page = total_pages
+
+    start_idx = (page - 1) * ITEMS_PER_PAGE
+    end_idx = start_idx + ITEMS_PER_PAGE
+    page_rows = rows[start_idx:end_idx]
 
     markup = types.InlineKeyboardMarkup(row_width=1)
 
     if not rows:
         text = "Нет ДЗ."
     else:
-        text = "<b>Выберите предмет:</b>"
+        text = f"<b>Выберите предмет (страница {page}/{total_pages}):</b>"
 
-    for subject, min_id, photo_json, file_json in rows:
+    for subject, min_id, photo_json, video_json, audio_json, file_json in page_rows:
         photos = json.loads(photo_json) if photo_json else []
+        videos = json.loads(video_json) if video_json else []
+        audios = json.loads(audio_json) if audio_json else []
         files = json.loads(file_json) if file_json else []
         label = subject
         if photos: label += f" (фото: {len(photos)})"
+        if videos: label += f" (видео: {len(videos)})"
+        if audios: label += f" (аудио: {len(audios)})"
         if files: label += f" (файлы: {len(files)})"
         btn = types.InlineKeyboardButton(label, callback_data=f"hw_show_{min_id}")
         markup.add(btn)
@@ -547,10 +675,21 @@ def show_hw_subjects_list(message, user_id=None):
         btn_add = types.InlineKeyboardButton("Добавить ДЗ", callback_data="hw_add")
         markup.add(btn_add)
 
+    # Пагинация
+    nav_row = []
+    if page > 1:
+        btn_prev = types.InlineKeyboardButton("◀️ Предыдущая", callback_data=f"hw_list_{page-1}")
+        nav_row.append(btn_prev)
+    if page < total_pages:
+        btn_next = types.InlineKeyboardButton("Следующая ▶️", callback_data=f"hw_list_{page+1}")
+        nav_row.append(btn_next)
+    if nav_row:
+        markup.row(*nav_row)
+
     btn_back = types.InlineKeyboardButton("Назад", callback_data="back_to_main")
     markup.add(btn_back)
 
-    if hasattr(message, 'callback_query'):
+    if hasattr(message, 'message_id'):
         bot.edit_message_text(chat_id=message.chat.id, message_id=message.message_id,
                               text=text, parse_mode='HTML', reply_markup=markup)
     else:
@@ -559,7 +698,7 @@ def show_hw_subjects_list(message, user_id=None):
 def show_hw_details(message, hw_id, user_id):
     conn = sqlite3.connect('homework.db')
     c = conn.cursor()
-    c.execute('SELECT id, subject, task, due_date, photo_file_ids, file_file_ids FROM homework WHERE id = ?', (hw_id,))
+    c.execute('SELECT id, subject, task, due_date, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids FROM homework WHERE id = ?', (hw_id,))
     row = c.fetchone()
     conn.close()
 
@@ -572,16 +711,20 @@ def show_hw_details(message, hw_id, user_id):
     task = row[2]
     due = row[3]
     all_photos = json.loads(row[4]) if row[4] else []
-    all_files = json.loads(row[5]) if row[5] else []
+    all_videos = json.loads(row[5]) if row[5] else []
+    all_audios = json.loads(row[6]) if row[6] else []
+    all_files = json.loads(row[7]) if row[7] else []
 
     text = f"<b>ДЗ по предмету: {html.escape(subject)}</b>\n\n"
     due_text = f"Срок: {html.escape(due)}" if due else "Срок: Не указано"
     photo_mark = f" (фото: {len(all_photos)})" if all_photos else ""
+    video_mark = f" (видео: {len(all_videos)})" if all_videos else ""
+    audio_mark = f" (аудио: {len(all_audios)})" if all_audios else ""
     file_mark = f" (файлы: {len(all_files)})" if all_files else ""
-    text += f"{photo_mark}{file_mark}\n{html.escape(task)}\n{due_text}\n\n"
+    text += f"{photo_mark}{video_mark}{audio_mark}{file_mark}\n{html.escape(task)}\n{due_text}\n\n"
 
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="hw_list")
+    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="hw_list_1")
     markup.add(btn_back)
 
     if is_hw_admin(user_id):
@@ -599,6 +742,18 @@ def show_hw_details(message, hw_id, user_id):
         except Exception as e:
             bot.send_message(message.chat.id, f"Ошибка отправки фото: {e}")
 
+    for video_id in all_videos:
+        try:
+            bot.send_video(message.chat.id, video_id)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"Не удалось отправить видео: {e}")
+
+    for audio_id in all_audios:
+        try:
+            bot.send_audio(message.chat.id, audio_id)
+        except Exception as e:
+            bot.send_message(message.chat.id, f"Не удалось отправить аудио: {e}")
+
     for file_id in all_files:
         try:
             bot.send_document(message.chat.id, file_id)
@@ -606,7 +761,7 @@ def show_hw_details(message, hw_id, user_id):
             bot.send_message(message.chat.id, f"Не удалось отправить файл: {e}")
 
 def hw_start_add_hw(message, user_id):
-    hw_add_state[user_id] = {'step': 'subject', 'photos': [], 'files': []}
+    hw_add_state[user_id] = {'step': 'subject', 'photos': [], 'videos': [], 'audios': [], 'files': []}
     markup = types.InlineKeyboardMarkup()
     btn_cancel = types.InlineKeyboardButton("Отмена", callback_data="cancel")
     markup.add(btn_cancel)
@@ -644,21 +799,32 @@ def hw_get_due_date(message):
 
     markup = types.InlineKeyboardMarkup(row_width=2)
     btn_photo = types.InlineKeyboardButton("Фото", callback_data="hw_add_more_photos")
+    btn_video = types.InlineKeyboardButton("Видео", callback_data="hw_add_more_videos")
+    btn_audio = types.InlineKeyboardButton("Аудио", callback_data="hw_add_more_audios")
     btn_file = types.InlineKeyboardButton("Файлы", callback_data="hw_add_more_files")
     btn_done = types.InlineKeyboardButton("Готово", callback_data="hw_finish_adding")
     btn_cancel = types.InlineKeyboardButton("Отмена", callback_data="cancel")
-    markup.add(btn_photo, btn_file)
+    markup.add(btn_photo, btn_video)
+    markup.add(btn_audio, btn_file)
     markup.add(btn_done)
     markup.add(btn_cancel)
 
     sent = bot.send_message(message.chat.id,
-                            "Добавьте <b>фото</b> или <b>файлы</b> (PDF, DOC, ZIP и др.)\n"
+                            "Добавьте <b>фото</b>, <b>видео</b>, <b>аудио</b> или <b>файлы</b> (PDF, DOC, ZIP и др.)\n"
                             "или нажмите <b>Готово</b>", parse_mode='HTML', reply_markup=markup)
     hw_add_state[user_id]['last_msg_id'] = sent.message_id
 
 def hw_continue_adding_photos(call, user_id):
     if hw_add_state.get(user_id, {}).get('step') != 'attachments': return
     bot.answer_callback_query(call.id, "Отправьте фото...")
+
+def hw_continue_adding_videos(call, user_id):
+    if hw_add_state.get(user_id, {}).get('step') != 'attachments': return
+    bot.answer_callback_query(call.id, "Отправьте видео...")
+
+def hw_continue_adding_audios(call, user_id):
+    if hw_add_state.get(user_id, {}).get('step') != 'attachments': return
+    bot.answer_callback_query(call.id, "Отправьте аудио...")
 
 def hw_continue_adding_files(call, user_id):
     if hw_add_state.get(user_id, {}).get('step') != 'attachments': return
@@ -672,6 +838,24 @@ def hw_get_photos(message):
     hw_add_state[user_id]['photos'].append(file_id)
     count = len(hw_add_state[user_id]['photos'])
     bot.reply_to(message, f"Добавлено фото: {count}. Отправьте ещё или нажмите <b>Готово</b>.", parse_mode='HTML')
+
+@bot.message_handler(func=lambda m: hw_add_state.get(m.from_user.id, {}).get('step') == 'attachments', content_types=['video'])
+def hw_get_videos(message):
+    user_id = message.from_user.id
+    if not is_hw_admin(user_id): return
+    file_id = message.video.file_id
+    hw_add_state[user_id]['videos'].append(file_id)
+    count = len(hw_add_state[user_id]['videos'])
+    bot.reply_to(message, f"Добавлено видео: {count}. Отправьте ещё или нажмите <b>Готово</b>.", parse_mode='HTML')
+
+@bot.message_handler(func=lambda m: hw_add_state.get(m.from_user.id, {}).get('step') == 'attachments', content_types=['audio'])
+def hw_get_audios(message):
+    user_id = message.from_user.id
+    if not is_hw_admin(user_id): return
+    file_id = message.audio.file_id
+    hw_add_state[user_id]['audios'].append(file_id)
+    count = len(hw_add_state[user_id]['audios'])
+    bot.reply_to(message, f"Добавлено аудио: {count}. Отправьте ещё или нажмите <b>Готово</b>.", parse_mode='HTML')
 
 @bot.message_handler(func=lambda m: hw_add_state.get(m.from_user.id, {}).get('step') == 'attachments', content_types=['document'])
 def hw_get_files(message):
@@ -688,8 +872,12 @@ def hw_finish_adding_hw(call, user_id):
     task = data['task']
     due_date = data['due_date']
     photos = data['photos']
+    videos = data['videos']
+    audios = data['audios']
     files = data['files']
     photo_json = json.dumps(photos) if photos else None
+    video_json = json.dumps(videos) if videos else None
+    audio_json = json.dumps(audios) if audios else None
     file_json = json.dumps(files) if files else None
 
     conn = sqlite3.connect('homework.db')
@@ -701,16 +889,16 @@ def hw_finish_adding_hw(call, user_id):
 
     # ДОБАВЛЯЕМ НОВОЕ
     c.execute('''
-        INSERT INTO homework (subject, task, due_date, photo_file_ids, file_file_ids, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (subject, task, due_date, photo_json, file_json, datetime.now().strftime('%Y-%m-%d %H:%M')))
+        INSERT INTO homework (subject, task, due_date, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (subject, task, due_date, photo_json, video_json, audio_json, file_json, datetime.now().strftime('%Y-%m-%d %H:%M')))
     conn.commit()
     conn.close()
 
     action = "обновлено" if deleted > 0 else "добавлено"
     response = f"<b>ДЗ по предмету <code>{html.escape(subject)}</code> {action}!</b>\n\n<b>{html.escape(task)}</b>\nСрок: {html.escape(due_date or 'Не указано')}"
     markup = types.InlineKeyboardMarkup()
-    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="hw_list")
+    btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="hw_list_1")
     markup.add(btn_back)
 
     sent_text = False
@@ -723,6 +911,18 @@ def hw_finish_adding_hw(call, user_id):
             sent_text = True
         except Exception as e:
             bot.send_message(call.message.chat.id, f"Ошибка при отправке фото: {e}")
+
+    for video_id in videos:
+        try:
+            bot.send_video(call.message.chat.id, video_id)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"Ошибка при отправке видео: {e}")
+
+    for audio_id in audios:
+        try:
+            bot.send_audio(call.message.chat.id, audio_id)
+        except Exception as e:
+            bot.send_message(call.message.chat.id, f"Ошибка при отправке аудио: {e}")
 
     if files:
         for file_id in files:
