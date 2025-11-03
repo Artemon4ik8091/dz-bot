@@ -62,7 +62,8 @@ def init_notes_db():
             audio_file_ids TEXT,
             file_file_ids TEXT,
             created_at TEXT,
-            creator_username TEXT
+            creator_username TEXT,
+            views INTEGER DEFAULT 0
         )
     ''')
     c.execute("PRAGMA table_info(notes)")
@@ -77,6 +78,26 @@ def init_notes_db():
         c.execute('ALTER TABLE notes ADD COLUMN file_file_ids TEXT')
     if 'creator_username' not in columns:
         c.execute('ALTER TABLE notes ADD COLUMN creator_username TEXT')
+    if 'views' not in columns:
+        c.execute('ALTER TABLE notes ADD COLUMN views INTEGER DEFAULT 0')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS reactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            reaction INTEGER NOT NULL,
+            UNIQUE(note_id, user_id)
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id INTEGER NOT NULL,
+            user_identifier TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT
+        )
+    ''')
     conn.commit()
     conn.close()
 
@@ -153,6 +174,22 @@ def callback_handler(call):
         note_id = int(call.data.split("_", 2)[2])
         show_notes_details(call.message, note_id, user_id)
         return
+    elif call.data.startswith("notes_like_"):
+        note_id = int(call.data.split("_", 2)[2])
+        handle_note_reaction(call, note_id, 1)
+        return
+    elif call.data.startswith("notes_dislike_"):
+        note_id = int(call.data.split("_", 2)[2])
+        handle_note_reaction(call, note_id, -1)
+        return
+    elif call.data.startswith("notes_view_comments_"):
+        note_id = int(call.data.split("_", 3)[3])
+        show_note_comments(call, note_id)
+        return
+    elif call.data.startswith("notes_add_comment_"):
+        note_id = int(call.data.split("_", 3)[3])
+        start_add_comment(call.message, user_id, note_id)
+        return
     elif call.data.startswith("hw_list_"):
         page = int(call.data.split("_", 2)[2])
         show_hw_subjects_list(call.message, user_id, page)
@@ -225,6 +262,8 @@ def callback_handler(call):
             del hw_add_state[user_id]
         if user_id in hw_edit_state:
             del hw_edit_state[user_id]
+        if user_id in comments_add_state:
+            del comments_add_state[user_id]
         bot.edit_message_text(chat_id=chat_id, message_id=message_id,
                               text="Действие отменено.", reply_markup=None)
         bot.send_message(chat_id, "Новости последнего обновления:\nДобавлен раздел с заметками! Писать там можно что угодно и когда удобно (эксклюзивно людям из группы МЕХАТРОНИКОВ :). Другим нельзя). Жду мемчики и всякую ересь. Полезной инфы не надо (шутка). Good Luck!\n\nГлавное меню:", reply_markup=main_menu(user_id))
@@ -233,6 +272,7 @@ def callback_handler(call):
 
 notes_add_state = {}
 notes_edit_state = {}
+comments_add_state = {}
 
 def show_notes_titles_list(message, user_id=None, page=1):
     if user_id is None:
@@ -301,27 +341,43 @@ def show_notes_titles_list(message, user_id=None, page=1):
     else:
         bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=markup)
 
-def show_notes_details(message, note_id, user_id):
+def get_note_details(note_id, user_id):
     conn = sqlite3.connect('notes.db')
     c = conn.cursor()
-    c.execute('SELECT id, title, content, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at, creator_username FROM notes WHERE id = ?', (note_id,))
+    c.execute('SELECT id, title, content, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at, creator_username, views FROM notes WHERE id = ?', (note_id,))
     row = c.fetchone()
-    conn.close()
 
     if not row:
-        bot.send_message(message.chat.id, "Заметка не найдена.", parse_mode='HTML')
-        return
+        return None, None, None, None, None, None, None, None, None, None, None, None, None
 
     title_id = row[0]
     title = row[1]
     content = row[2]
-    all_photos = json.loads(row[3]) if row[3] else []
-    all_videos = json.loads(row[4]) if row[4] else []
-    all_audios = json.loads(row[5]) if row[5] else []
-    all_files = json.loads(row[6]) if row[6] else []
+    photo_json = row[3]
+    video_json = row[4]
+    audio_json = row[5]
+    file_json = row[6]
     created_at = row[7]
     creator_identifier = row[8]
+    views = row[9]
 
+    all_photos = json.loads(photo_json) if photo_json else []
+    all_videos = json.loads(video_json) if video_json else []
+    all_audios = json.loads(audio_json) if audio_json else []
+    all_files = json.loads(file_json) if file_json else []
+
+    c.execute('SELECT COUNT(*) FROM reactions WHERE note_id = ? AND reaction = 1', (note_id,))
+    likes = c.fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM reactions WHERE note_id = ? AND reaction = -1', (note_id,))
+    dislikes = c.fetchone()[0]
+    c.execute('SELECT COUNT(*) FROM comments WHERE note_id = ?', (note_id,))
+    comments_count = c.fetchone()[0]
+
+    conn.close()
+
+    return title_id, title, content, all_photos, all_videos, all_audios, all_files, created_at, creator_identifier, views, likes, dislikes, comments_count
+
+def build_note_text(title, content, all_photos, all_videos, all_audios, all_files, created_at, creator_identifier, views, likes, dislikes, comments_count):
     text = f"<b>Заметка: {html.escape(title)}</b>\n\n"
     photo_mark = f" (фото: {len(all_photos)})" if all_photos else ""
     video_mark = f" (видео: {len(all_videos)})" if all_videos else ""
@@ -334,15 +390,47 @@ def show_notes_details(message, note_id, user_id):
     else:
         creator_display = f"@{html.escape(creator_identifier)}"
     text += f"Создатель: {creator_display} | Дата создания: {html.escape(created_at)}\n"
+    text += f"Просмотры: {views} | Лайки: {likes} | Дизлайки: {dislikes} | Комментарии: {comments_count}\n"
 
+    return text
+
+def build_note_markup(note_id, user_id, likes, dislikes, comments_count):
     markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_like = types.InlineKeyboardButton(f"👍 {likes}", callback_data=f"notes_like_{note_id}")
+    btn_dislike = types.InlineKeyboardButton(f"👎 {dislikes}", callback_data=f"notes_dislike_{note_id}")
+    markup.add(btn_like, btn_dislike)
+
+    btn_add_comment = types.InlineKeyboardButton("Добавить комментарий", callback_data=f"notes_add_comment_{note_id}")
+    markup.add(btn_add_comment)
+    if comments_count > 0:
+        btn_view_comments = types.InlineKeyboardButton(f"Просмотреть комментарии ({comments_count})", callback_data=f"notes_view_comments_{note_id}")
+        markup.add(btn_view_comments)
+
     btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="notes_list_1")
     markup.add(btn_back)
 
     if is_notes_admin(user_id):
-        btn_edit = types.InlineKeyboardButton("Редактировать", callback_data=f"notes_edit_title_{title_id}")
-        btn_delete = types.InlineKeyboardButton("Удалить", callback_data=f"notes_delete_title_{title_id}")
+        btn_edit = types.InlineKeyboardButton("Редактировать", callback_data=f"notes_edit_title_{note_id}")
+        btn_delete = types.InlineKeyboardButton("Удалить", callback_data=f"notes_delete_title_{note_id}")
         markup.add(btn_edit, btn_delete)
+
+    return markup
+
+def show_notes_details(message, note_id, user_id):
+    conn = sqlite3.connect('notes.db')
+    c = conn.cursor()
+    c.execute('UPDATE notes SET views = views + 1 WHERE id = ?', (note_id,))
+    conn.commit()
+    conn.close()
+
+    title_id, title, content, all_photos, all_videos, all_audios, all_files, created_at, creator_identifier, views, likes, dislikes, comments_count = get_note_details(note_id, user_id)
+
+    if not title:
+        bot.send_message(message.chat.id, "Заметка не найдена.", parse_mode='HTML')
+        return
+
+    text = build_note_text(title, content, all_photos, all_videos, all_audios, all_files, created_at, creator_identifier, views, likes, dislikes, comments_count)
+    markup = build_note_markup(note_id, user_id, likes, dislikes, comments_count)
 
     bot.send_message(message.chat.id, text, parse_mode='HTML', reply_markup=markup)
 
@@ -371,6 +459,95 @@ def show_notes_details(message, note_id, user_id):
             bot.send_document(message.chat.id, file_id)
         except Exception as e:
             bot.send_message(message.chat.id, f"Не удалось отправить файл: {e}")
+
+def show_note_comments(call, note_id):
+    conn = sqlite3.connect('notes.db')
+    c = conn.cursor()
+    c.execute('SELECT title FROM notes WHERE id = ?', (note_id,))
+    title_row = c.fetchone()
+    title = title_row[0] if title_row else "Неизвестно"
+    c.execute('SELECT user_identifier, content, created_at FROM comments WHERE note_id = ? ORDER BY id', (note_id,))
+    comments = c.fetchall()
+    conn.close()
+
+    text = f"<b>Комментарии к заметке: {html.escape(title)}</b>\n\n"
+    if not comments:
+        text += "Нет комментариев."
+    else:
+        for i, (user, cont, date) in enumerate(comments, 1):
+            user_disp = f"@{html.escape(user)}" if not user.isdigit() else f"ID {html.escape(user)}"
+            text += f"{i}. {user_disp}: {html.escape(cont)} ({html.escape(date)})\n\n"
+
+    markup = types.InlineKeyboardMarkup()
+    btn_back = types.InlineKeyboardButton("Назад к заметке", callback_data=f"notes_show_{note_id}")
+    markup.add(btn_back)
+
+    bot.send_message(call.message.chat.id, text, parse_mode='HTML', reply_markup=markup)
+
+def start_add_comment(message, user_id, note_id):
+    comments_add_state[user_id] = {'note_id': note_id}
+    markup = types.InlineKeyboardMarkup()
+    btn_cancel = types.InlineKeyboardButton("Отмена", callback_data="cancel")
+    markup.add(btn_cancel)
+    bot.send_message(message.chat.id, "Введите ваш комментарий:", parse_mode='HTML', reply_markup=markup)
+
+@bot.message_handler(func=lambda m: m.from_user.id in comments_add_state)
+def add_comment(message):
+    user_id = message.from_user.id
+    data = comments_add_state.get(user_id)
+    if not data:
+        return
+    note_id = data['note_id']
+    content = message.text.strip()
+    if not content:
+        bot.reply_to(message, "Комментарий не может быть пустым.")
+        return
+    identifier = message.from_user.username if message.from_user.username else str(user_id)
+    local_tz = timezone(timedelta(hours=3))
+    created_at = datetime.now(tz=local_tz).strftime('%Y-%m-%d %H:%M')
+
+    conn = sqlite3.connect('notes.db')
+    c = conn.cursor()
+    c.execute('INSERT INTO comments (note_id, user_identifier, content, created_at) VALUES (?, ?, ?, ?)', (note_id, identifier, content, created_at))
+    conn.commit()
+    conn.close()
+
+    bot.reply_to(message, "Комментарий добавлен!")
+    del comments_add_state[user_id]
+
+def handle_note_reaction(call, note_id, target_reaction):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+
+    conn = sqlite3.connect('notes.db')
+    c = conn.cursor()
+    c.execute('SELECT reaction FROM reactions WHERE note_id = ? AND user_id = ?', (note_id, user_id))
+    row = c.fetchone()
+    current_reaction = row[0] if row else None
+
+    if current_reaction == target_reaction:
+        # Удалить реакцию
+        c.execute('DELETE FROM reactions WHERE note_id = ? AND user_id = ?', (note_id, user_id))
+    else:
+        if current_reaction is not None:
+            # Обновить реакцию
+            c.execute('UPDATE reactions SET reaction = ? WHERE note_id = ? AND user_id = ?', (target_reaction, note_id, user_id))
+        else:
+            # Добавить новую реакцию
+            c.execute('INSERT INTO reactions (note_id, user_id, reaction) VALUES (?, ?, ?)', (note_id, user_id, target_reaction))
+
+    conn.commit()
+    conn.close()
+
+    # Перезагрузить детали
+    title_id, title, content, all_photos, all_videos, all_audios, all_files, created_at, creator_identifier, views, likes, dislikes, comments_count = get_note_details(note_id, user_id)
+
+    text = build_note_text(title, content, all_photos, all_videos, all_audios, all_files, created_at, creator_identifier, views, likes, dislikes, comments_count)
+    markup = build_note_markup(note_id, user_id, likes, dislikes, comments_count)
+
+    bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, parse_mode='HTML', reply_markup=markup)
+    bot.answer_callback_query(call.id)
 
 def notes_start_add_note(message, user_id, creator_identifier):
     notes_add_state[user_id] = {'step': 'title', 'photos': [], 'videos': [], 'audios': [], 'files': [], 'creator_identifier': creator_identifier}
@@ -609,6 +786,15 @@ def notes_do_delete_title_by_id(call, title_id):
     c.execute('SELECT title FROM notes WHERE id = ?', (title_id,))
     row = c.fetchone()
     title = row[0] if row else "Неизвестно"
+
+    # Get all note ids with this title
+    c.execute('SELECT id FROM notes WHERE title = ?', (title,))
+    note_ids = [r[0] for r in c.fetchall()]
+
+    # Delete reactions and comments
+    for nid in note_ids:
+        c.execute('DELETE FROM reactions WHERE note_id = ?', (nid,))
+        c.execute('DELETE FROM comments WHERE note_id = ?', (nid,))
 
     c.execute('DELETE FROM notes WHERE title = ?', (title,))
     deleted = c.rowcount
