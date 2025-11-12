@@ -114,7 +114,8 @@ def init_hw_db():
             video_file_ids TEXT,
             audio_file_ids TEXT,
             file_file_ids TEXT,
-            created_at TEXT
+            created_at TEXT,
+            creator_username TEXT
         )
     ''')
     c.execute("PRAGMA table_info(homework)")
@@ -127,6 +128,8 @@ def init_hw_db():
         c.execute('ALTER TABLE homework ADD COLUMN audio_file_ids TEXT')
     if 'file_file_ids' not in columns:
         c.execute('ALTER TABLE homework ADD COLUMN file_file_ids TEXT')
+    if 'creator_username' not in columns:
+        c.execute('ALTER TABLE homework ADD COLUMN creator_username TEXT')
     conn.commit()
     conn.close()
 
@@ -233,7 +236,8 @@ def callback_handler(call):
         title_id = call.data.split("_", 4)[4]
         notes_do_delete_title_by_id(call, title_id)
     elif call.data == "hw_add":
-        hw_start_add_hw(call.message, user_id)
+        creator_identifier = call.from_user.username if call.from_user.username else str(call.from_user.id)
+        hw_start_add_hw(call.message, user_id, creator_identifier)
     elif call.data == "hw_add_more_photos":
         hw_continue_adding_photos(call, user_id)
     elif call.data == "hw_add_more_videos":
@@ -884,7 +888,7 @@ def show_hw_subjects_list(message, user_id=None, page=1):
 def show_hw_details(message, hw_id, user_id):
     conn = sqlite3.connect('homework.db')
     c = conn.cursor()
-    c.execute('SELECT id, subject, task, due_date, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids FROM homework WHERE id = ?', (hw_id,))
+    c.execute('SELECT id, subject, task, due_date, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at, creator_username FROM homework WHERE id = ?', (hw_id,))
     row = c.fetchone()
     conn.close()
 
@@ -900,6 +904,8 @@ def show_hw_details(message, hw_id, user_id):
     all_videos = json.loads(row[5]) if row[5] else []
     all_audios = json.loads(row[6]) if row[6] else []
     all_files = json.loads(row[7]) if row[7] else []
+    created_at = row[8]
+    creator_identifier = row[9]
 
     text = f"<b>ДЗ по предмету: {html.escape(subject)}</b>\n\n"
     due_text = f"Срок: {html.escape(due)}" if due else "Срок: Не указано"
@@ -908,6 +914,13 @@ def show_hw_details(message, hw_id, user_id):
     audio_mark = f" (аудио: {len(all_audios)})" if all_audios else ""
     file_mark = f" (файлы: {len(all_files)})" if all_files else ""
     text += f"{photo_mark}{video_mark}{audio_mark}{file_mark}\n{html.escape(task)}\n{due_text}\n\n"
+
+    if creator_identifier:
+        if creator_identifier.isdigit():
+            creator_display = f"ID {html.escape(creator_identifier)}"
+        else:
+            creator_display = f"@{html.escape(creator_identifier)}"
+        text += f"Загружено: {creator_display} | Дата добавления: {html.escape(created_at or 'Неизвестно')}\n"
 
     markup = types.InlineKeyboardMarkup(row_width=2)
     btn_back = types.InlineKeyboardButton("Назад к списку", callback_data="hw_list_1")
@@ -946,8 +959,8 @@ def show_hw_details(message, hw_id, user_id):
         except Exception as e:
             bot.send_message(message.chat.id, f"Не удалось отправить файл: {e}")
 
-def hw_start_add_hw(message, user_id):
-    hw_add_state[user_id] = {'step': 'subject', 'photos': [], 'videos': [], 'audios': [], 'files': []}
+def hw_start_add_hw(message, user_id, creator_identifier):
+    hw_add_state[user_id] = {'step': 'subject', 'photos': [], 'videos': [], 'audios': [], 'files': [], 'creator_identifier': creator_identifier}
     markup = types.InlineKeyboardMarkup()
     btn_cancel = types.InlineKeyboardButton("Отмена", callback_data="cancel")
     markup.add(btn_cancel)
@@ -1061,10 +1074,13 @@ def hw_finish_adding_hw(call, user_id):
     videos = data['videos']
     audios = data['audios']
     files = data['files']
+    creator_identifier = data['creator_identifier']
     photo_json = json.dumps(photos) if photos else None
     video_json = json.dumps(videos) if videos else None
     audio_json = json.dumps(audios) if audios else None
     file_json = json.dumps(files) if files else None
+    local_tz = timezone(timedelta(hours=3))
+    created_at = datetime.now(tz=local_tz).strftime('%Y-%m-%d %H:%M')
 
     conn = sqlite3.connect('homework.db')
     c = conn.cursor()
@@ -1075,9 +1091,9 @@ def hw_finish_adding_hw(call, user_id):
 
     # ДОБАВЛЯЕМ НОВОЕ
     c.execute('''
-        INSERT INTO homework (subject, task, due_date, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (subject, task, due_date, photo_json, video_json, audio_json, file_json, datetime.now().strftime('%Y-%m-%d %H:%M')))
+        INSERT INTO homework (subject, task, due_date, photo_file_ids, video_file_ids, audio_file_ids, file_file_ids, created_at, creator_username)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (subject, task, due_date, photo_json, video_json, audio_json, file_json, created_at, creator_identifier))
     conn.commit()
     conn.close()
 
@@ -1242,7 +1258,8 @@ def notes_add_cmd(message):
 @bot.message_handler(commands=['hw_add'])
 def hw_add_cmd(message):
     if is_hw_admin(message.from_user.id):
-        hw_start_add_hw(message, message.from_user.id)
+        creator_identifier = message.from_user.username if message.from_user.username else str(message.from_user.id)
+        hw_start_add_hw(message, message.from_user.id, creator_identifier)
     else:
         bot.reply_to(message, "Доступ запрещён для ДЗ.")
 
